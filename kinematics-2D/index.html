@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Physics Playground</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="controls">
+      <div id="menus">
+        <div id="particle-container">
+          <h3>Particle property</h3>
+          <div id="particle-container-properties">
+            <div class="field">
+              <label for="x-position">x position</label>
+              <input type="number" name="x-position" id="x-position" step="any">
+            </div>
+
+            <div class="field">
+              <label for="y-position">y position</label>
+              <input type="number" name="y-position" id="y-position" step="any">
+            </div>
+
+            <div class="field">
+              <label for="x-velocity">x velocity</label>
+              <input type="number" name="x-velocity" id="x-velocity" step="any">
+            </div>
+
+            <div class="field">
+              <label for="y-velocity">y velocity</label>
+              <input type="number" name="y-velocity" id="y-velocity" step="any">
+            </div>
+
+            <div class="field">
+              <label for="mass">mass</label>
+              <input type="number" name="mass" id="mass" step="any" value="1">
+            </div>
+          </div>
+        </div>
+
+        <div id="wind-container">
+          <h3>Wind controller</h3>
+          <div class="field">
+            <label for="wind-force">force — <output id="wind-force-value">10</output></label>
+            <input type="range" min="0" max="50" step="1" value="10" id="wind-force">
+          </div>
+          <div class="field">
+            <label for="wind-toggle">enable wind</label>
+            <label class="switch">
+              <input type="checkbox" id="wind-toggle">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <button type="button" id="create-particle-btn">Create particle</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

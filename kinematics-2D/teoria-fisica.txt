@@ -1,0 +1,694 @@
+TEORIA: COMO FUNCIONA LA SIMULACION DE LA PARTICULA
+====================================================
+
+1. QUE ES EL "ESTADO" DE LA PARTICULA
+-------------------------------------
+Imagina que estas describiendo un carro a alguien por telefono.
+Necesitas decirle tres cosas:
+
+- Donde esta?              -> posicion (x, y)
+- Que tan rapido va y hacia donde? -> velocidad (vx, vy)
+- Esta acelerando, frenando, o constante? -> aceleracion (ax, ay)
+
+Esas tres cosas, en cada instante, describen completamente el
+movimiento. Eso es el "estado". En el codigo vive en el objeto
+`particle`.
+
+La relacion entre ellas es en cadena:
+- La ACELERACION cambia la VELOCIDAD
+- La VELOCIDAD cambia la POSICION
+
+Por eso la gravedad (una aceleracion constante hacia abajo) hace
+que la particula primero acumule velocidad hacia abajo, y esa
+velocidad es lo que finalmente mueve la posicion.
+
+
+2. COMO ACTUALIZAMOS LA PARTICULA CADA FRAME (funcion update)
+--------------------------------------------------------------
+La computadora no puede simular el movimiento de forma continua,
+solo puede dar "saltitos" en el tiempo. Cada salto dura DT segundos
+(en este proyecto, ~0.016s, que es aproximadamente 1/60 de segundo).
+
+En cada salto hacemos dos preguntas, en este orden:
+
+Pregunta 1: "Como cambio mi velocidad en este instante tan corto?"
+
+    particle.vy = particle.vy + particle.ay * dt;
+
+  Traducido: "mi nueva velocidad es la velocidad que tenia, mas lo
+  que la aceleracion la cambio durante este pequeno instante de
+  tiempo".
+
+Pregunta 2: "Como cambio mi posicion, dado que ahora se mi nueva
+velocidad?"
+
+    particle.y = particle.y + particle.vy * dt;
+
+  Traducido: "mi nueva posicion es donde estaba, mas la distancia
+  que recorri en este instante (velocidad x tiempo)".
+
+Este metodo de "avanzar a saltitos pequenos, recalculando todo en
+cada uno" se llama INTEGRACION DE EULER. Es la forma mas simple de
+simular fisica en una computadora. No es perfecta (acumula pequenos
+errores), pero para una simulacion didactica es mas que suficiente.
+
+Por que primero la velocidad y luego la posicion?
+Porque necesitas saber que tan rapido te mueves ANTES de poder
+calcular cuanto avanzaste. Si lo hicieras al reves, estarias
+moviendo la particula con una velocidad "vieja", desfasada respecto
+al instante actual.
+
+
+3. COMO MANEJAMOS LOS LIMITES (funcion handleBoundaries)
+----------------------------------------------------------
+Piensa en una pelota rebotando dentro de una caja. Cada vez que la
+pelota toca una pared, pasan dos cosas:
+
+Cosa 1 - Se "devuelve":
+La direccion de su movimiento en ese eje se invierte. Si iba hacia
+abajo, ahora va hacia arriba (eje vertical); si iba hacia la
+derecha, ahora va hacia la izquierda (eje horizontal).
+
+En codigo, "invertir" una velocidad es multiplicarla por -1:
+
+    particle.vy = particle.vy * -RESTITUTION;
+
+Cosa 2 - Pierde un poco de energia:
+En la vida real, ningun rebote es perfecto, la pelota nunca sube
+exactamente tan alto como cayo. Esa "perdida" se representa con el
+COEFICIENTE DE RESTITUCION (RESTITUTION = 0.9): en lugar de
+invertir la velocidad multiplicando por -1, multiplicas por -0.9.
+Asi, cada rebote es un 10% mas debil que el anterior, con el tiempo
+la particula pierde altura hasta casi detenerse, tal como una
+pelota real.
+
+Por que corregimos tambien la posicion?
+Como avanzamos "a saltitos" (ver punto 2), es posible que en un
+saltito la particula termine ATRAVESANDO la pared antes de que
+detectemos la colision. Si no hacemos nada, se veria como si la
+particula se hundiera en el borde. Por eso, cuando detectamos que
+cruzo el limite, la "tele-transportamos" de vuelta justo al borde:
+
+    particle.y = (height / SCALE) - PARTICLE_RADIUS;
+
+Por que PARTICLE_RADIUS?
+La particula no es un punto, es un circulo con tamano. Si solo
+comparas el centro del circulo contra el borde, la mitad del
+circulo ya estaria "fuera" cuando se detecta el choque. Por eso
+restamos el radio: asi el borde visual del circulo es el que
+realmente toca la pared, no su centro.
+
+
+4. COLISIONES ENTRE PARTICULAS (funcion handleCollisions)
+------------------------------------------------------------
+Hasta ahora cada particula vivia en su propio mundo: rebotaba
+contra las paredes, pero ignoraba a las demas. En este bloque,
+las particulas pueden chocar ENTRE ELLAS, como bolas de billar.
+
+4.1 Revisando todas las parejas posibles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Para saber si hay un choque, hay que comparar cada particula
+contra todas las demas, pero SIN repetir comparaciones. Si ya
+comparaste "particula 1 con particula 2", no tiene sentido volver
+a comparar "particula 2 con particula 1" - es la misma pareja.
+
+Por eso usamos dos loops anidados, donde el segundo siempre
+empieza un paso adelante del primero:
+
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        // particles[i] y particles[j] son una pareja unica
+      }
+    }
+
+Con 4 particulas (indices 0,1,2,3), esto genera las parejas:
+(0,1) (0,2) (0,3) (1,2) (1,3) (2,3) - exactamente 6, sin repetir
+ninguna y sin comparar una particula consigo misma.
+
+4.2 Que tan lejos estan dos particulas?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Para saber si dos particulas estan tocandose, primero necesitas
+la distancia entre sus centros. Esto es el Teorema de Pitagoras:
+
+    dx = particles[j].x - particles[i].x
+    dy = particles[j].y - particles[i].y
+    distance = sqrt(dx*dx + dy*dy)
+
+Traducido: "dx" y "dy" son cuanto se separan en horizontal y
+vertical. La distancia real (en linea recta) es la hipotenusa de
+ese triangulo.
+
+Dos particulas estan en colision cuando esa distancia es menor
+que la suma de sus radios. Como ambas particulas son del mismo
+tamano, la suma es "2 * PARTICLE_RADIUS":
+
+    if (distance < 2 * PARTICLE_RADIUS) { ... colision ... }
+
+4.3 Separarlas para que no se queden pegadas
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Como avanzamos "a saltitos" (igual que en el punto 2), es muy
+probable que cuando detectes la colision, las dos particulas ya
+esten ligeramente encimadas una sobre otra. Si no corriges eso,
+en el siguiente frame seguiran detectandose como "en colision" una
+y otra vez, y se quedan temblando, pegadas.
+
+La solucion es calcular cuanto se estan encimando (el "overlap")
+y separarlas esa distancia, mitad y mitad:
+
+    overlap = 2 * PARTICLE_RADIUS - distance
+
+Para saber HACIA DONDE moverlas, usamos el VECTOR NORMAL: una
+flecha de longitud 1 que apunta de una particula hacia la otra.
+Se obtiene dividiendo dx y dy entre la distancia total:
+
+    nx = dx / distance
+    ny = dy / distance
+
+Con esa direccion, empujamos cada particula la mitad del overlap,
+en sentidos opuestos:
+
+    p1.x -= nx * overlap / 2
+    p1.y -= ny * overlap / 2
+    p2.x += nx * overlap / 2
+    p2.y += ny * overlap / 2
+
+Es como si ambas particulas se "alejaran un pasito" cada una en
+direccion contraria, hasta dejar de tocarse.
+
+4.4 Como rebotan una contra la otra (el choque elastico)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Aqui esta la parte mas interesante: cuando dos bolas de billar
+chocan de frente, intercambian velocidad en la direccion del
+golpe, pero NO en la direccion perpendicular (si chocan de lado,
+casi no se desvian).
+
+Primero calculamos la velocidad RELATIVA entre ambas (que tan
+rapido se acercan o alejan una de otra):
+
+    dvx = p2.vx - p1.vx
+    dvy = p2.vy - p1.vy
+
+Luego proyectamos esa velocidad relativa sobre el vector normal
+(la direccion del golpe). Esto se hace con un PRODUCTO PUNTO:
+
+    vn = dvx * nx + dvy * ny
+
+"vn" es un solo numero que responde: "a lo largo de la linea que
+une a las dos particulas, se estan acercando o alejando, y que
+tan rapido?"
+
+- Si vn es NEGATIVO -> se estan acercando (van a chocar de verdad)
+- Si vn es POSITIVO o CERO -> ya se estan alejando, no hay nada
+  que resolver (por eso solo aplicamos la siguiente parte cuando
+  vn < 0)
+
+Cuando SI se acercan (vn < 0), para masas iguales el choque
+elastico simplemente "pasa" esa componente de velocidad de una
+particula a la otra:
+
+    p1.vx += vn * nx
+    p1.vy += vn * ny
+    p2.vx -= vn * nx
+    p2.vy -= vn * ny
+
+Traducido con la analogia del billar: la energia que traia una
+bola "en direccion del golpe" se la transfiere a la otra, como si
+chocaran y se pasaran el impulso. Lo que no cambia es la velocidad
+perpendicular al golpe - por eso un choque de lado casi no
+desvia a las particulas.
+
+4.5 El caso raro: distancia cero
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Hay una division en el paso 4.3 (nx = dx / distance) que se rompe
+si "distance" es exactamente 0 - es decir, si dos particulas
+nacen exactamente en el mismo punto (por ejemplo, si creas dos
+particulas sin llenar el formulario, ambas apareceran en x=0,
+y=0). Dividir entre 0 da "NaN" (Not a Number), y ese valor se
+contagia a todo lo demas, rompiendo la simulacion en silencio.
+
+Para evitarlo, si "distance" sale exactamente 0, le asignamos un
+numero muy pequenito en su lugar (0.0001) antes de hacer
+cualquier division. Es un "parche" minimo que evita el problema
+sin afectar el resultado visual - la separacion del punto 4.3 se
+encarga de alejarlas inmediatamente despues.
+
+
+5. MASA Y FUERZAS: HACIENDO LA FISICA MAS REAL
+------------------------------------------------
+Hasta ahora habia una "trampa": a cada particula le decias
+directamente cuanta aceleracion tenia (le clavabamos ay = GRAVITY
+a mano). Eso funcionaba, pero es como hacer trampa en un examen:
+da el resultado correcto sin entender el porque. Ademas, todas las
+particulas pesaban lo mismo (masa = 1 implicita), asi que una
+"pelota de boliche" y una "pelota de ping pong" se comportaban
+igual. En este bloque arreglamos las dos cosas.
+
+5.1 Que es la masa y por que importa
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+La masa es "que tan dificil es mover algo". Empujar un carrito de
+super vacio es facil; empujarlo lleno cuesta mas, aunque uses la
+misma fuerza. Esa resistencia a cambiar de movimiento es la masa
+(tambien llamada INERCIA).
+
+Ahora cada particula guarda su propia masa, y el usuario la elige
+al crearla. Validamos que sea mayor que 0: una masa de 0 (o
+negativa) no tiene sentido fisico, y ademas mas adelante dividimos
+ENTRE la masa - dividir entre 0 romperia todo.
+
+5.2 La Segunda Ley de Newton: F = m * a
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Esta es la idea central de todo el bloque. La frase famosa
+"fuerza = masa por aceleracion" se puede leer al reves, que es
+como la usa la computadora:
+
+    aceleracion = fuerza / masa       (a = F / m)
+
+Traducido: "si conozco TODAS las fuerzas que empujan a un objeto,
+y conozco su masa, puedo calcular como va a acelerar". Una misma
+fuerza acelera mucho a algo ligero y poquito a algo pesado (por
+eso un soplido mueve una hoja pero no una roca).
+
+Antes inventabamos la aceleracion. Ahora la DEDUCIMOS de las
+fuerzas. Es el cambio conceptual mas importante del proyecto.
+
+5.3 El patron "acumulador de fuerzas" (en update)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sobre una particula pueden actuar varias fuerzas a la vez (su
+peso, el viento, el rozamiento del aire...). La fisica dice que el
+efecto total es simplemente la SUMA de todas ellas. Asi que cada
+frame, para cada particula, seguimos 4 pasos:
+
+Paso 1 - Empezar la cuenta en cero:
+
+    let fx = 0;
+    let fy = 0;
+
+  "fx" y "fy" son un bote vacio donde iremos echando las fuerzas
+  horizontales y verticales de ESTE instante.
+
+Paso 2 - Echar las fuerzas al bote. Por ahora solo el peso:
+
+    fy += particle.mass * GRAVITY;
+
+  El peso es masa por gravedad (un objeto pesado pesa mas, logico).
+  Va en "fy" porque la gravedad jala hacia abajo (eje vertical).
+
+Paso 3 - Aplicar la Segunda Ley para sacar la aceleracion:
+
+    particle.ax = fx / particle.mass;
+    particle.ay = fy / particle.mass;
+
+Paso 4 - Integrar igual que siempre (lo del punto 2): la
+  aceleracion cambia la velocidad, y la velocidad cambia la
+  posicion.
+
+Por que "fx" y "fy" se reinician a 0 DENTRO del bucle, una vez por
+particula? Porque el bote de fuerzas es personal de cada particula
+y de cada frame. Si no lo vaciaras, las fuerzas de una particula
+se "arrastrarian" a la siguiente, o se irian acumulando frame tras
+frame hasta volverse gigantes. Cada particula empieza con el bote
+limpio.
+
+Un detalle bonito: como el peso es "masa * GRAVITY" y luego
+dividimos "fy / masa", la masa se cancela y la aceleracion vertical
+siempre da GRAVITY, sin importar el peso. Eso es CORRECTO: en el
+vacio, una pluma y un martillo caen igual de rapido (el famoso
+experimento de Galileo). La masa solo hara diferencia cuando
+aparezcan fuerzas que NO dependan de ella, como el viento.
+
+Y lo mas util: agregar una fuerza nueva ahora es trivial. El
+viento, el rozamiento, un iman... todos se reducen a "echar una
+linea mas al bote" en el Paso 2, sin tocar nada del resto.
+
+5.4 Colisiones con masas distintas: el IMPULSO
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+En el bloque 4, cuando dos particulas chocaban, simplemente se
+"intercambiaban" la velocidad. Eso solo es correcto si pesan lo
+mismo. En la vida real, si un camion choca con una bicicleta, la
+bici sale volando y el camion casi ni se inmuta. Para modelar eso
+necesitamos el concepto de IMPULSO.
+
+El impulso es "la cantidad de golpe" que se reparte en el choque:
+un solo numero que mide cuanto empujon total hubo. Luego, ese
+golpe se reparte entre las dos particulas segun su masa.
+
+Primero calculamos la "masa inversa" de cada una (1 / masa):
+
+    invMass1 = 1 / p1.mass
+    invMass2 = 1 / p2.mass
+    totalInvMass = invMass1 + invMass2
+
+La masa inversa es "que tan facil es moverla": algo pesado tiene
+masa inversa chiquita (se mueve poco), algo ligero la tiene grande
+(se mueve mucho). Es el reves de la inercia.
+
+Con eso, la magnitud del golpe (el impulso) es:
+
+    impulse = -(1 + RESTITUTION) * vn / totalInvMass
+
+  Donde "vn" es que tan rapido se acercaban (del punto 4.4), y
+  RESTITUTION mete la perdida de energia del rebote (el mismo 0.9
+  de las paredes - antes los choques entre particulas eran
+  perfectos, ahora tambien pierden un poco, como en la realidad).
+
+Y por fin repartimos ese golpe. Cada particula cambia su velocidad
+segun su masa inversa, en sentidos opuestos:
+
+    p1.vx -= impulse * invMass1 * nx;   (la liviana cambia mas)
+    p2.vx += impulse * invMass2 * nx;   (la pesada cambia menos)
+
+Traducido: el mismo golpe (impulse) afecta MUCHO a la particula
+ligera y POCO a la pesada. Como la bici y el camion. Que ambas
+reciban el mismo golpe en sentidos opuestos es la Tercera Ley de
+Newton (accion y reaccion) en accion.
+
+5.5 Separar tambien segun la masa
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+En el punto 4.3 separabamos las particulas encimadas mitad y mitad.
+Ahora que tienen masas distintas, eso ya no es justo: la pesada
+casi no deberia moverse. Asi que repartimos la separacion (el
+"overlap") con la misma logica de la masa inversa:
+
+    correction1 = overlap * invMass1 / totalInvMass
+    correction2 = overlap * invMass2 / totalInvMass
+
+La particula ligera cede mas espacio, la pesada se queda casi en su
+lugar - igual que si empujas una pelota de playa contra una bola de
+boliche: la de playa es la que se aparta.
+
+En resumen de todo el bloque: dejamos de "inventar" la aceleracion
+y empezamos a calcularla de verdad a partir de fuerzas y masa
+(Segunda Ley), repartimos los choques segun el peso de cada
+particula (impulso + Tercera Ley), y de paso dejamos el sistema
+listo para sumar fuerzas nuevas, como el viento, con una sola
+linea.
+
+
+6. EL VIENTO: UNA FUERZA QUE TU CONTROLAS
+-------------------------------------------
+Aqui cobra sentido todo el trabajo del bloque anterior. Como ya
+montamos el "acumulador de fuerzas", agregar el viento es justo
+lo que prometimos: echar una fuerza mas al bote. El viento tiene
+dos partes que se controlan por separado: hacia DONDE sopla (una
+direccion) y que tan FUERTE sopla (una magnitud).
+
+6.1 La fuerza del viento (en update)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+El viento se guarda en cuatro variables: si esta encendido
+(windEnabled), su fuerza (windMagnitude, que mueve el usuario con
+un slider), y su direccion como un vector unitario (windDirX,
+windDirY) - una flecha de longitud 1 que solo indica HACIA DONDE,
+no cuanto.
+
+Dentro del acumulador de fuerzas, justo al lado del peso, sumamos:
+
+    if (windEnabled) {
+      fx += windDirX * windMagnitude;
+      fy += windDirY * windMagnitude;
+    }
+
+Traducido: "reparte la fuerza total del viento (windMagnitude)
+entre el eje horizontal y el vertical, segun hacia donde apunte la
+direccion". Si el viento apunta a la derecha (windDirX = 1,
+windDirY = 0), toda la fuerza va a "fx"; si apunta en diagonal, se
+reparte entre los dos.
+
+Lo bonito: el viento es una FUERZA, no una aceleracion. Y como en
+update() dividimos fuerza entre masa (a = F/m), el mismo viento
+acelera MUCHO a una particula ligera y POCO a una pesada. Por eso,
+con viento encendido, las particulas livianas "salen volando" y
+las pesadas apenas se mueven. Eso salio gratis gracias a la masa
+del bloque 5 - no tuvimos que programar nada extra.
+
+6.2 Dibujar la flecha (la geometria de la punta)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Para que el usuario VEA el viento, dibujamos una flecha que sale
+del centro del canvas, apunta en la direccion del viento, y cuyo
+largo refleja la magnitud:
+
+    endX = centerX + windDirX * shaftLength
+    endY = centerY + windDirY * shaftLength
+
+El cuerpo de la flecha es solo una linea del centro a ese extremo.
+La parte interesante es la PUNTA (el triangulito). Para construirla
+necesitamos una direccion PERPENDICULAR a la flecha, para abrir las
+dos esquinas de la punta hacia los lados.
+
+Truco util: para girar un vector 90 grados, intercambias sus
+componentes y le cambias el signo a una:
+
+    perpX = -windDirY
+    perpY =  windDirX
+
+Con ese perpendicular, retrocedemos un poco desde la punta y
+abrimos una esquina a cada lado. El triangulo une la punta con
+esas dos esquinas, y asi la flecha apunta bien sin importar la
+direccion.
+
+Un detalle: usamos push() y pop() alrededor del dibujo. En p5,
+cambiar un estilo (color, grosor de linea) es GLOBAL y se queda
+pegado para todo lo que se dibuje despues. push() guarda el estado
+actual y pop() lo restaura, para que el color magenta y el grosor
+de la flecha no "contaminen" al resto del dibujo (como el borde del
+canvas).
+
+6.3 Mover el viento con el mouse (normalizar otra vez)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Queremos que, al hacer clic y arrastrar dentro del canvas, el
+viento apunte del centro hacia el cursor. La matematica es la misma
+que ya usamos en las colisiones (el vector normal).
+
+Primero, el vector del centro al mouse:
+
+    dx = mouseX - width / 2
+    dy = mouseY - height / 2
+
+Pero ese vector tiene una longitud cualquiera (depende de que tan
+lejos este el mouse del centro). A nosotros solo nos importa la
+DIRECCION, no la distancia. Por eso lo NORMALIZAMOS: lo dividimos
+entre su propia longitud para que mida exactamente 1.
+
+    distance = sqrt(dx*dx + dy*dy)
+    windDirX = dx / distance
+    windDirY = dy / distance
+
+Asi windDirX/windDirY siguen siendo un vector unitario (esto es
+importante: tanto la fuerza como la flecha asumen que mide 1). Si
+el mouse cae justo en el centro, "distance" seria 0 y dividir
+explotaria, asi que ese caso lo cortamos antes (igual que el parche
+de distancia cero en las colisiones).
+
+Todo esto vive en mouseDragged(), una funcion especial que p5 llama
+sola cada vez que mueves el mouse con el boton apretado. Solo
+actualizamos la direccion si el arrastre es DENTRO del canvas y si
+el viento esta encendido.
+
+En resumen del bloque: el viento confirmo que valio la pena el
+patron de fuerzas - se sumo en una sola linea. Reusamos la
+normalizacion de vectores (de las colisiones) para apuntarlo con el
+mouse, y la rotacion de 90 grados para dibujar la punta de la
+flecha. Y gracias a la masa, el viento empuja distinto a cada
+particula segun su peso, sin codigo extra.
+
+(Nota: despues, al agregar la "mano de dios", el control del viento
+cambio un poco: ya no se mueve arrastrando en cualquier lado, sino
+solo cuando agarras LA FLECHA. Asi el arrastre puede significar dos
+cosas distintas segun donde presiones: sobre una particula la
+agarras, sobre la flecha mueves el viento.)
+
+
+7. LA MANO DE DIOS: AGARRAR, LANZAR Y BORRAR PARTICULAS
+--------------------------------------------------------
+Hasta aqui las particulas vivian solas su vida fisica. Ahora el
+usuario puede meter la mano: agarrar una particula con el mouse,
+arrastrarla, lanzarla, usarla para golpear a las demas, o
+eliminarla. La idea es que se sienta como tomar una pelota real.
+
+7.1 Una particula "kinematica" (la que ignora las fuerzas)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Mientras tienes una particula agarrada, NO queremos que la gravedad
+ni el viento la jalen: debe obedecer solo a tu mano. A un objeto
+asi, que se mueve "porque alguien lo mueve" y no por fuerzas, se le
+llama KINEMATICO.
+
+Lo logramos con una variable, "heldParticle", que apunta a la
+particula sujeta (o vale null si no hay ninguna). En update(), antes
+de calcular cualquier fuerza, preguntamos: "esta particula es la que
+tengo agarrada?". Si si, la saltamos por completo y en su lugar la
+pegamos a la posicion del mouse:
+
+    particle.x = mouseX / SCALE
+    particle.y = mouseY / SCALE
+
+(dividimos entre SCALE porque el mouse esta en pixeles y las
+particulas viven en metros). Y como ya no pasa por el acumulador de
+fuerzas, la gravedad y el viento simplemente no la tocan. Al
+soltarla (heldParticle vuelve a null), las fuerzas la vuelven a
+afectar solas, sin codigo extra.
+
+7.2 Como "lanzarla": medir la velocidad del arrastre
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Si solo pegamos la particula al mouse, al soltarla se quedaria
+quieta y caeria a plomo. Pero tu quieres poder ARROJARLA. Para eso
+necesitamos saber a que velocidad la estabas moviendo en el momento
+de soltar.
+
+El truco es de pura definicion: velocidad = cuanta distancia
+recorrio dividida entre cuanto tiempo paso. Cada frame, sabemos
+donde estaba antes (particle.x) y a donde la lleva el mouse ahora
+(targetX), y sabemos el tiempo del frame (dt):
+
+    particle.vx = (targetX - particle.x) / dt
+    particle.vy = (targetY - particle.y) / dt
+
+Traducido: "si me movi mucho en un frame, llevo mucha velocidad; si
+casi no me movi, llevo poca". Esa velocidad se guarda en la
+particula. Asi, cuando la sueltas, ya trae ese "envion": si la
+sacudias rapido sale disparada, si la dejas quieta y sueltas
+simplemente cae. La fisica normal toma el control desde ahi.
+
+Detalle: limitamos la posicion del mouse a los bordes de la caja
+(con un min/max), para que no puedas sacar la particula del sandbox
+arrastrandola fuera.
+
+7.3 Golpear a otras: la masa infinita
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Quieres usar la particula que tienes agarrada para empujar a las
+demas - pero ella no deberia salir volando, porque la tienes sujeta.
+En fisica, un objeto que empuja a todos pero a quien nadie puede
+mover es uno de MASA INFINITA (como una pared, o el piso).
+
+Aqui se luce el sistema de impulso del bloque 5. Recuerda que todo
+se repartia segun la "masa inversa" (1 / masa). Pues a un objeto de
+masa infinita le corresponde masa inversa = 0. Y eso es justo lo que
+le ponemos a la particula agarrada en las colisiones:
+
+    invMass = (es la agarrada) ? 0 : 1 / masa
+
+Con masa inversa 0, las formulas que ya teniamos hacen lo correcto
+SOLAS: la correccion de posicion y el cambio de velocidad de la
+particula agarrada se multiplican por 0 (no se mueve ni cambia su
+velocidad), mientras que la otra particula recibe el golpe completo,
+como si rebotara contra una pared en movimiento. No hubo que
+inventar nada: la misma formula del bloque 5, con un 0 bien puesto.
+
+Y como la velocidad de la particula agarrada salio de tu arrastre
+(punto 7.2), si la mueves rapido contra otras, les pega fuerte. Esa
+es la parte divertida de la "mano de dios".
+
+7.4 Agarrar lo correcto y borrar (el hit-test)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Cuando haces clic, hay que saber SI tocaste una particula y CUAL.
+Eso es un "hit-test": medimos la distancia del mouse al centro de
+cada particula (otra vez Pitagoras), y si es menor que su radio,
+le diste:
+
+    distancia(mouse, particula) <= PARTICLE_RADIUS * SCALE
+
+Recorremos las particulas de la ultima a la primera, porque la
+ultima del arreglo es la que se dibuja "encima"; asi agarras la de
+arriba si hay varias encimadas.
+
+Con eso resolvemos los tres gestos:
+- Clic sostenido sobre una particula -> la agarras (heldParticle).
+- Clic sostenido sobre la flecha -> mueves el viento.
+- Doble clic sobre una particula -> la borras del arreglo (splice).
+
+En resumen del bloque: un objeto kinematico no es mas que "saltarse
+las fuerzas y mover a mano". El lanzamiento sale de la definicion
+mas basica de velocidad (distancia / tiempo). Y golpear a otras sin
+moverse reutiliza el sistema de impulso poniendo masa inversa 0 -
+otra muestra de lo potente que fue separar fuerzas, masa e impulso
+desde el bloque 5.
+
+
+8. VER LA MASA: TAMANO, COLOR Y ETIQUETA
+------------------------------------------
+Toda la fisica ya dependia de la masa (cae igual pero el viento la
+empuja distinto, choca distinto...), pero a simple vista TODAS las
+particulas se veian iguales: mismos circulos blancos. Este ultimo
+bloque hace la masa VISIBLE, con tres pistas a la vez: tamano, color
+y un numero.
+
+8.1 Tamano: el radio crece con la raiz de la masa
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Lo natural es "mas pesada = mas grande". Pero hay que tener cuidado
+con COMO crece. Si una particula de masa 4 fuera 4 veces mas ancha,
+se veria gigantesca. La razon es geometrica: cuando algo se hace mas
+grande, su "cantidad de material" (la masa) crece con el AREA, no
+con el ancho. Y el area de un circulo crece con el radio AL
+CUADRADO.
+
+Entonces, si masa es proporcional al radio al cuadrado, para
+despejar el radio hacemos lo contrario del cuadrado: la raiz.
+
+    radio = PARTICLE_RADIUS * raiz(masa)
+
+Asi, masa 4 -> radio x2 (no x4), masa 9 -> radio x3. Crece, pero de
+forma medida y realista. PARTICLE_RADIUS pasa a ser el radio "base"
+de una particula de masa 1.
+
+(Detalle practico: le ponemos un tope al radio, para que una masa
+absurdamente grande no genere una particula mas grande que la propia
+caja, lo que romperia los rebotes contra las paredes.)
+
+Lo importante: antes habia UN radio fijo para todas. Ahora cada
+particula trae su propio "radius", y ese valor se usa en TODOS lados
+donde antes iba el radio fijo:
+- al dibujarla (su diametro en pixeles),
+- en las paredes (cuanto antes de tocar el borde rebota),
+- en el hit-test de la mano de dios (que tan cerca hay que hacer
+  clic),
+- y en las colisiones: dos particulas chocan cuando la distancia
+  entre sus centros es menor que la SUMA de sus radios (una grande
+  y una chica se tocan antes que dos chicas).
+
+8.2 Color: un segundo canal de informacion
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+El tamano ya dice mucho, pero reforzamos con color. Mapeamos la masa
+a un gradiente: cian para las ligeras, magenta para las pesadas.
+
+La idea es una "regla de tres" entre dos rangos: tomamos la masa
+(de 1 a 10) y la convertimos a un numero de 0 a 1, y con ese numero
+mezclamos entre los dos colores extremos, canal por canal (rojo,
+verde, azul):
+
+    t = masa convertida al rango 0..1  (y recortada si se sale)
+    color = mezcla(cian, magenta, t)
+
+Si la masa es 1 o menos, t=0 -> cian puro; si es 10 o mas, t=1 ->
+magenta puro; en medio, un tono intermedio. Es puro dibujo, no toca
+nada de la fisica.
+
+Codificar el MISMO dato (la masa) en dos canales distintos -tamano
+y color- es buena practica de visualizacion: aunque alguien no
+distinga bien los colores, el tamano se lo dice igual, y al reves.
+
+8.3 La etiqueta: el numero exacto
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tamano y color dan una idea RELATIVA ("esta es mas pesada que
+aquella"), pero no el valor exacto. Por eso encima de cada particula
+dibujamos su masa como texto, centrado.
+
+Dos detalles de cuidado:
+- El texto se centra con textAlign(CENTER, CENTER) y su tamano se
+  adapta al radio, para que no se desborde en las particulas chicas.
+- Como el usuario puede escribir masas con muchos decimales,
+  redondeamos SOLO la etiqueta a un decimal (la masa real conserva
+  toda su precision para los calculos). Asi un "3.14159" se muestra
+  como "3.1", pero la fisica sigue usando el valor completo.
+
+En resumen del bloque: hicimos visible algo que ya existia en los
+numeros. El unico concepto nuevo y util es el del tamano: la masa va
+con el AREA, asi que el radio va con la raiz de la masa. El resto
+fue propagar ese radio por toda la fisica (un solo radio fijo paso a
+ser uno por particula) y agregar dos pistas visuales mas -color y
+numero- que no tocan la simulacion, solo la hacen mas facil de leer.
+
+------------------------------------------------------------
+Y con esto el simulador esta completo: empezamos con una sola
+particula cayendo (estado + integracion de Euler), le dimos paredes,
+choques entre varias, masa y fuerzas reales (Segunda y Tercera ley),
+viento, una "mano de dios" para jugar con ellas, y finalmente la
+forma de distinguirlas de un vistazo. Todo construido pieza por
+pieza, reutilizando en cada bloque lo aprendido en el anterior.
